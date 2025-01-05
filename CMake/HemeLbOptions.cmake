@@ -31,6 +31,7 @@ else()
 endif()
 pass_option(HEMELB HEMELB_USE_AVX "Use AVX intrinsics" OFF)
 pass_option(HEMELB HEMELB_USE_SSE3 "Use SSE3 intrinsics" ${_default_sse3_flag})
+pass_option(HEMELB HEMELB_USE_OPENMP "Use OpenMP" OFF)
 pass_option(HEMELB HEMELB_USE_VELOCITY_WEIGHTS_FILE "Use Velocity weights file" OFF)
 
 pass_option(HEMELB HEMELB_SEPARATE_CONCERNS "Communicate for each concern separately" OFF)
