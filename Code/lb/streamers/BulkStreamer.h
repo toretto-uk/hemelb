@@ -10,6 +10,11 @@
 #include "lb/streamers/Common.h"
 #include "lb/HFunction.h"
 
+#include <chrono>
+#include <iostream>
+#include "log/Logger.h"
+#include <omp.h>
+
 namespace hemelb::lb
 {
     /// Do bulk streaming along a link
@@ -69,6 +74,9 @@ namespace hemelb::lb
                               geometry::FieldData& latDat,
                               lb::MacroscopicPropertyCache& propertyCache)
         {
+            static auto elapsed = std::chrono::nanoseconds(0);
+            static int i = 0;
+            auto start = std::chrono::system_clock::now();
 #pragma omp parallel for
             for (site_t siteIndex = firstIndex; siteIndex < (firstIndex + siteCount); siteIndex++)
             {
@@ -88,6 +96,14 @@ namespace hemelb::lb
                 }
 
                 UpdateCachePostCollision(site, hydroVars, lbmParams, propertyCache);
+
+                log::Logger::Log<log::Info, log::OnePerCore>("Thread id: %d\n", omp_get_thread_num());
+            }
+            auto end = std::chrono::system_clock::now();
+            elapsed += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+            if (i++ >= 19998)
+            {
+              log::Logger::Log<log::Info, log::OnePerCore>("Total duration: %lld, site count: %d\n", elapsed.count(), siteCount);
             }
         }
 
