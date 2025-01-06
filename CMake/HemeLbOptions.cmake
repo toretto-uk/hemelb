@@ -29,6 +29,7 @@ if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
 else()
   set(_default_sse3_flag OFF)
 endif()
+pass_option(HEMELB HEMELB_USE_AVX "Use AVX intrinsics" OFF)
 pass_option(HEMELB HEMELB_USE_SSE3 "Use SSE3 intrinsics" ${_default_sse3_flag})
 pass_option(HEMELB HEMELB_USE_VELOCITY_WEIGHTS_FILE "Use Velocity weights file" OFF)
 

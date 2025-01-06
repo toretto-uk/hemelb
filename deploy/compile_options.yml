@@ -79,6 +79,8 @@ separated_concerns:
 no_debug:
   CMAKE_CXX_FLAGS: "-DNDEBUG"
   CMAKE_C_FLAGS: "-DNDEBUG"
+use_avx:
+  HEMELB_USE_AVX: OFF
 use_sse:
   HEMELB_USE_SSE3: ON
 lri_runs:
