@@ -177,6 +177,20 @@ namespace hemelb::lb
 
           }
 
+#elif HEMELB_USE_OPENMP
+        inline static void CalculateDensityAndMomentum(const_span f,
+                                                       distribn_t &density,
+                                                       LatticeMomentum& momentum) {
+          density = 0.0;
+          momentum = {0.0, 0.0, 0.0};
+#pragma omp simd
+          for (Direction i = 0; i < NUMVECTORS; ++i)
+          {
+            density += f[i];
+            momentum += VECTORS[i] * f[i];
+          }
+        }
+
 #else
         inline static void CalculateDensityAndMomentum(const_span f,
                                                        distribn_t &density,
@@ -190,7 +204,7 @@ namespace hemelb::lb
             }
         }
 
-#endif                   
+#endif
 
           /**
            * Calculates density and momentum, including Guo forcing
@@ -319,6 +333,32 @@ namespace hemelb::lb
 
             }
         }
+#elif HEMELB_USE_OPENMP
+        inline static void CalculateFeq(const distribn_t &density, const distribn_t &momentum_x,
+                                        const distribn_t &momentum_y,
+                                        const distribn_t &momentum_z, mut_span f_eq)
+        {
+          const distribn_t density_1 = 1. / density;
+          const distribn_t momentumMagnitudeSquared = momentum_x * momentum_x
+                                                      + momentum_y * momentum_y + momentum_z * momentum_z;
+
+#pragma omp simd
+          for (Direction i = 0; i < NUMVECTORS; ++i)
+          {
+            const distribn_t mom_dot_ei = CX[i] * momentum_x + CY[i] * momentum_y
+                                          + CZ[i] * momentum_z;
+
+            if constexpr (COMPRESSIBLE) {
+              f_eq[i] = EQMWEIGHTS[i]
+                        * (density - (3. / 2.) * momentumMagnitudeSquared * density_1
+                           + (9. / 2.) * density_1 * mom_dot_ei * mom_dot_ei + 3. * mom_dot_ei);
+            } else {
+              f_eq[i] = EQMWEIGHTS[i]
+                        * (density - (3. / 2.) * momentumMagnitudeSquared
+                           + (9. / 2.) * mom_dot_ei * mom_dot_ei + 3. * mom_dot_ei);
+            }
+          }
+        }
 #else
 
           /**
@@ -441,6 +481,27 @@ namespace hemelb::lb
             }
 
           }
+#elif HEMELB_USE_OPENMP
+        inline static void CalculateForceDistribution(const distribn_t &tau,
+                                                      const LatticeVelocity& velocity,
+                                                      const LatticeForceVector& force,
+                                                      mut_span forceDist)
+        {
+          auto constexpr invCs2 = 1e0 / Cs2;
+          auto constexpr invCs4 = invCs2 * invCs2;
+          distribn_t prefactor = (1.0 - (1.0 / (2.0 * tau)));
+          distribn_t vDotF = Dot(velocity, force);
+
+#pragma omp simd
+          for (Direction i = 0; i < NUMVECTORS; ++i) {
+            distribn_t vDotDir = Dot(velocity, CD[i]);
+            distribn_t fDotDir = Dot(force, CD[i]);
+
+            forceDist[i] = prefactor * EQMWEIGHTS[i] * (
+                                                           invCs2 * (fDotDir - vDotF) + invCs4 * (fDotDir * vDotDir)
+                                                       );
+          }
+        }
 #else
 
         inline static void CalculateForceDistribution(const distribn_t &tau,
