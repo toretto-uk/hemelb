@@ -78,18 +78,24 @@ namespace hemelb::lb
         using FArray = std::array<distribn_t, Q>;
 
         static constexpr Direction NUMVECTORS = Q;
+#ifdef HEMELB_USE_AVX
+        static constexpr std::size_t SIMD_ALIGNMENT = 32;
+#else
+        static constexpr std::size_t SIMD_ALIGNMENT = 16;
+#endif
 
         static constexpr std::array<util::Vector3D<int>, Q> VECTORS = V;
         static constexpr std::array<int, Q> CX = detail::get_component<int>(V, 0);
         static constexpr std::array<int, Q> CY = detail::get_component<int>(V, 1);
         static constexpr std::array<int, Q> CZ = detail::get_component<int>(V, 2);
 
-        alignas(16) static constexpr std::array<util::Vector3D<distribn_t>, Q> CD = detail::array_as<distribn_t>(V);
-        alignas(16) static constexpr FArray CXD = detail::get_component<distribn_t>(V, 0);
-        alignas(16) static constexpr FArray CYD = detail::get_component<distribn_t>(V, 1);
-        alignas(16) static constexpr FArray CZD = detail::get_component<distribn_t>(V, 2);
+        alignas(SIMD_ALIGNMENT) static constexpr std::array<util::Vector3D<distribn_t>, Q> CD =
+            detail::array_as<distribn_t>(V);
+        alignas(SIMD_ALIGNMENT) static constexpr FArray CXD = detail::get_component<distribn_t>(V, 0);
+        alignas(SIMD_ALIGNMENT) static constexpr FArray CYD = detail::get_component<distribn_t>(V, 1);
+        alignas(SIMD_ALIGNMENT) static constexpr FArray CZD = detail::get_component<distribn_t>(V, 2);
 
-        alignas(16) static constexpr FArray EQMWEIGHTS = W;
+        alignas(SIMD_ALIGNMENT) static constexpr FArray EQMWEIGHTS = W;
         // The index of the inverse direction of each discrete velocity vector
         static constexpr std::array<Direction, Q> INVERSEDIRECTIONS = detail::compute_inverses(V);
 
