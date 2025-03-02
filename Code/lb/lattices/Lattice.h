@@ -114,22 +114,24 @@ namespace hemelb::lb
             __m256d accMomY = _mm256_setzero_pd();
             __m256d accMomZ = _mm256_setzero_pd();
 
-            const int leftover = NUMVECTORS % 4;
-            const int mainLoopEnd = NUMVECTORS - leftover;
+            Direction leftover = NUMVECTORS % 4;
+            Direction mainLoopEnd = NUMVECTORS - leftover;
 
-            double partialDens = 0.0;
-            double partialMomX = 0.0;
-            double partialMomY = 0.0;
-            double partialMomZ = 0.0;
+            distribn_t partialDens = 0.0;
+            distribn_t partialMomX = 0.0;
+            distribn_t partialMomY = 0.0;
+            distribn_t partialMomZ = 0.0;
 
-            for (int i = mainLoopEnd; i < NUMVECTORS; ++i) {
+            Direction i;
+            for (i = mainLoopEnd; i < NUMVECTORS; ++i)
+            {
                 partialDens += f[i];
                 partialMomX += CXD[i] * f[i];
                 partialMomY += CYD[i] * f[i];
                 partialMomZ += CZD[i] * f[i];
             }
 
-            for (int i = 0; i < mainLoopEnd; i += 4)
+            for (i = 0; i < mainLoopEnd; i += 4)
             {
                 __m256d fVec  = _mm256_loadu_pd(&f[i]);
                 __m256d cxVec = _mm256_load_pd(&CXD[i]);
@@ -143,21 +145,24 @@ namespace hemelb::lb
                 accMomZ = _mm256_fmadd_pd(czVec, fVec, accMomZ);
             }
 
-            alignas(32) double bufDens[4], bufX[4], bufY[4], bufZ[4];
-            _mm256_store_pd(bufDens, accDens);
-            _mm256_store_pd(bufX,     accMomX);
-            _mm256_store_pd(bufY,     accMomY);
-            _mm256_store_pd(bufZ,     accMomZ);
+            auto hsum_avx = [](__m256d const& v)
+            {
+                __m256d temp    = _mm256_hadd_pd(v, v);
+                __m128d sumHigh = _mm256_extractf128_pd(temp, 1);
+                __m128d sumLow  = _mm256_castpd256_pd128(temp);
+                __m128d total   = _mm_add_pd(sumHigh, sumLow);
+                return _mm_cvtsd_f64(total);
+            };
 
-            double sumDens = bufDens[0] + bufDens[1] + bufDens[2] + bufDens[3];
-            double sumX    = bufX[0]    + bufX[1]    + bufX[2]    + bufX[3];
-            double sumY    = bufY[0]    + bufY[1]    + bufY[2]    + bufY[3];
-            double sumZ    = bufZ[0]    + bufZ[1]    + bufZ[2]    + bufZ[3];
+            distribn_t sumDens = hsum_avx(accDens);
+            distribn_t sumX    = hsum_avx(accMomX);
+            distribn_t sumY    = hsum_avx(accMomY);
+            distribn_t sumZ    = hsum_avx(accMomZ);
 
-            density     = sumDens + partialDens;
-            momentum_x  = sumX    + partialMomX;
-            momentum_y  = sumY    + partialMomY;
-            momentum_z  = sumZ    + partialMomZ;
+            density    = sumDens + partialDens;
+            momentum_x = sumX    + partialMomX;
+            momentum_y = sumY    + partialMomY;
+            momentum_z = sumZ    + partialMomZ;
         }
 #elif HEMELB_USE_SSE3
         inline static void CalculateDensityAndMomentum(const_span f,
@@ -296,72 +301,68 @@ namespace hemelb::lb
         }
 
 #ifdef HEMELB_USE_AVX
-        static void CalculateFeq(const distribn_t &density,
-                         const distribn_t &momentum_x,
-                         const distribn_t &momentum_y,
-                         const distribn_t &momentum_z,
-                         mut_span f_eq)
+        static void CalculateFeq(distribn_t const& density,
+                                 distribn_t const& momentum_x,
+                                 distribn_t const& momentum_y,
+                                 distribn_t const& momentum_z,
+                                 mut_span f_eq)
         {
-            double momentumMagnitudeSquared = momentum_x*momentum_x
-                                            + momentum_y*momentum_y
-                                            + momentum_z*momentum_z;
-            double threeHalvesOfMomSqr = 1.5 * momentumMagnitudeSquared;
+            static constexpr distribn_t THREE_HALVES = 3.0 / 2.0;
+            static constexpr distribn_t NINE_HALVES = 9.0 / 2.0;
+            static constexpr distribn_t THREE = 3.0;
 
-            double tmp1_scalar;
-            if constexpr (COMPRESSIBLE) {
-                tmp1_scalar = density - (threeHalvesOfMomSqr / density);
-            } else {
-                tmp1_scalar = density - threeHalvesOfMomSqr;
-            }
+            distribn_t momentumMagnitudeSquared = momentum_x * momentum_x +
+                                                  momentum_y * momentum_y +
+                                                  momentum_z * momentum_z;
+            distribn_t threeHalvesOfMomentumMagnitudeSquared = THREE_HALVES * momentumMagnitudeSquared;
+
+            distribn_t tmp1_scalar;
+            if constexpr (COMPRESSIBLE)
+                tmp1_scalar = density - threeHalvesOfMomentumMagnitudeSquared / density;
+            else
+                tmp1_scalar = density - threeHalvesOfMomentumMagnitudeSquared;
+
+            distribn_t density_1 = 1.0 / density;
+            distribn_t nineHalvesOfDensity_1 = NINE_HALVES;
+            if constexpr (COMPRESSIBLE)
+                nineHalvesOfDensity_1 *= density_1;
+
+            __m256d tmp1_avx = _mm256_set1_pd(tmp1_scalar);
+            __m256d nineOnTwoDensity_1_avx = _mm256_set1_pd(nineHalvesOfDensity_1);
+            __m256d three_avx = _mm256_set1_pd(THREE);
 
             __m256d mx = _mm256_set1_pd(momentum_x);
             __m256d my = _mm256_set1_pd(momentum_y);
             __m256d mz = _mm256_set1_pd(momentum_z);
 
-            double nineHalvesOfDensity_1 = 4.5; // 9/2
-            double density_1 = 1.0 / density;
-            if constexpr (COMPRESSIBLE) {
-                nineHalvesOfDensity_1 *= density_1;
-            }
-            __m256d n9o2 = _mm256_set1_pd(nineHalvesOfDensity_1);
-            __m256d three = _mm256_set1_pd(3.0);
-            __m256d tmp1_avx = _mm256_set1_pd(tmp1_scalar);
-
-            int leftover = NUMVECTORS % 4;
-            int mainLoopEnd = NUMVECTORS - leftover;
-
-            int i = 0;
-            for (; i < mainLoopEnd; i += 4)
+            Direction numVect4 = (NUMVECTORS / 4) * 4;
+            Direction i = 0;
+            for (; i < numVect4; i += 4)
             {
                 __m256d cx = _mm256_load_pd(&CXD[i]);
                 __m256d cy = _mm256_load_pd(&CYD[i]);
                 __m256d cz = _mm256_load_pd(&CZD[i]);
                 __m256d w  = _mm256_load_pd(&EQMWEIGHTS[i]);
 
-                __m256d mdot = _mm256_add_pd(
-                                   _mm256_add_pd(_mm256_mul_pd(cx, mx),
-                                                 _mm256_mul_pd(cy, my)),
-                                   _mm256_mul_pd(cz, mz));
-
+                __m256d mdot = _mm256_fmadd_pd(cx, mx, _mm256_fmadd_pd(cy, my, _mm256_mul_pd(cz, mz)));
                 __m256d mdot_sq = _mm256_mul_pd(mdot, mdot);
-                __m256d tmp2    = _mm256_mul_pd(n9o2, mdot_sq);
 
-                __m256d tmp3 = _mm256_mul_pd(three, mdot);
+                __m256d sumPart = _mm256_fmadd_pd(nineOnTwoDensity_1_avx, mdot_sq, tmp1_avx);
+                sumPart = _mm256_fmadd_pd(three_avx, mdot, sumPart);
 
-                __m256d sumPart = _mm256_add_pd(tmp1_avx, tmp2);
-                sumPart = _mm256_add_pd(sumPart, tmp3);
-
-                __m256d feqPart = _mm256_fmadd_pd(w, sumPart, _mm256_setzero_pd());
-
-                _mm256_storeu_pd(&f_eq[i], feqPart);
+                _mm256_storeu_pd(&f_eq[i], _mm256_mul_pd(w, sumPart));
             }
 
             for (; i < NUMVECTORS; ++i)
             {
-                double mdot = CXD[i]*momentum_x + CYD[i]*momentum_y + CZD[i]*momentum_z;
-                f_eq[i] = EQMWEIGHTS[i] * ( tmp1_scalar
-                                          + nineHalvesOfDensity_1*(mdot*mdot)
-                                          + 3.0*mdot );
+                distribn_t mom_dot_ei = CXD[i] * momentum_x +
+                                        CYD[i] * momentum_y +
+                                        CZD[i] * momentum_z;
+
+                f_eq[i] = EQMWEIGHTS[i] *
+                          (tmp1_scalar +
+                           nineHalvesOfDensity_1 * (mom_dot_ei * mom_dot_ei) +
+                           THREE * mom_dot_ei);
             }
         }
 #elif HEMELB_USE_SSE3
@@ -539,17 +540,20 @@ namespace hemelb::lb
                                          forceDist);
           }
 
-          inline static void CalculateForceDistribution(const distribn_t &tau,
-                                                        const distribn_t &velocity_x,
-                                                        const distribn_t &velocity_y,
-                                                        const distribn_t &velocity_z,
-                                                        const LatticeForce &force_x,
-                                                        const LatticeForce &force_y,
-                                                        const LatticeForce &force_z,
+          inline static void CalculateForceDistribution(distribn_t const& tau,
+                                                        distribn_t const& velocity_x,
+                                                        distribn_t const& velocity_y,
+                                                        distribn_t const& velocity_z,
+                                                        LatticeForce const& force_x,
+                                                        LatticeForce const& force_y,
+                                                        LatticeForce const& force_z,
                                                         mut_span forceDist)
           {
-              double invCs2 = 1.0 / Cs2;
-              double invCs4 = invCs2 * invCs2;
+              distribn_t invCs2 = 1.0 / Cs2;
+              distribn_t invCs4 = invCs2 * invCs2;
+              distribn_t prefactor = 1.0 - 1.0 / (2.0 * tau);
+
+              distribn_t vScalarProductF = velocity_x * force_x + velocity_y * force_y + velocity_z * force_z;
 
               __m256d vx = _mm256_set1_pd(velocity_x);
               __m256d vy = _mm256_set1_pd(velocity_y);
@@ -559,21 +563,16 @@ namespace hemelb::lb
               __m256d fy = _mm256_set1_pd(force_y);
               __m256d fz = _mm256_set1_pd(force_z);
 
-              double prefactor = 1.0 - 1.0 / (2.0 * tau);
-              __m256d pf = _mm256_set1_pd(prefactor);
-
-              double vScalarProductF = velocity_x*force_x
-                                     + velocity_y*force_y
-                                     + velocity_z*force_z;
+              __m256d pf   = _mm256_set1_pd(prefactor);
               __m256d vSPF = _mm256_set1_pd(vScalarProductF);
 
               __m256d r3 = _mm256_set1_pd(invCs2);
               __m256d r9 = _mm256_set1_pd(invCs4);
 
-              int leftover = NUMVECTORS % 4;
-              int mainLoopEnd = NUMVECTORS - leftover;
+              Direction leftover = NUMVECTORS % 4;
+              Direction mainLoopEnd = NUMVECTORS - leftover;
 
-              int i = 0;
+              Direction i = 0;
               for (; i < mainLoopEnd; i += 4)
               {
                   __m256d cx = _mm256_load_pd(&CXD[i]);
@@ -581,42 +580,27 @@ namespace hemelb::lb
                   __m256d cz = _mm256_load_pd(&CZD[i]);
                   __m256d w  = _mm256_load_pd(&EQMWEIGHTS[i]);
 
-                  __m256d velocity_spd =
-                      _mm256_add_pd(
-                          _mm256_add_pd(_mm256_mul_pd(vx, cx),
-                                        _mm256_mul_pd(vy, cy)),
-                          _mm256_mul_pd(vz, cz));
+                  __m256d velocity_spd = _mm256_fmadd_pd(cx, vx, _mm256_fmadd_pd(cy, vy, _mm256_mul_pd(cz, vz)));
+                  __m256d force_spd = _mm256_fmadd_pd(cx, fx, _mm256_fmadd_pd(cy, fy, _mm256_mul_pd(cz, fz)));
 
-                  __m256d force_spd =
-                      _mm256_add_pd(
-                          _mm256_add_pd(_mm256_mul_pd(fx, cx),
-                                        _mm256_mul_pd(fy, cy)),
-                          _mm256_mul_pd(fz, cz));
+                  __m256d sumTerm = _mm256_fmadd_pd(
+                      r9, _mm256_mul_pd(force_spd, velocity_spd),
+                      _mm256_mul_pd(r3, _mm256_sub_pd(force_spd, vSPF))
+                  );
 
-                  __m256d term1 = _mm256_sub_pd(force_spd, vSPF);
-                  __m256d term2 = _mm256_mul_pd(force_spd, velocity_spd);
-
-                  __m256d partial1 = _mm256_mul_pd(r3, term1);
-
-                  __m256d partial2 = _mm256_mul_pd(r9, term2);
-
-                  __m256d sumTerm = _mm256_fmadd_pd(r9, term2, partial1);
-
-                  __m256d partial3 = _mm256_fmadd_pd(w, sumTerm, _mm256_setzero_pd());
-
-                  __m256d fd = _mm256_fmadd_pd(pf, partial3, _mm256_setzero_pd());
+                  __m256d fd = _mm256_mul_pd(_mm256_mul_pd(pf, w), sumTerm);
 
                   _mm256_storeu_pd(&forceDist[i], fd);
               }
 
               for (; i < NUMVECTORS; ++i)
               {
-                  double vDotC = velocity_x*CX[i] + velocity_y*CY[i] + velocity_z*CZ[i];
-                  double fDotC = force_x*CX[i]    + force_y*CY[i]    + force_z*CZ[i];
+                  distribn_t vDotC = velocity_x * CX[i] + velocity_y * CY[i] + velocity_z * CZ[i];
+                  distribn_t fDotC = force_x * CX[i]    + force_y * CY[i]    + force_z * CZ[i];
 
-                  forceDist[i] = prefactor * EQMWEIGHTS[i]
-                      * ( invCs2*(fDotC - vScalarProductF)
-                          + invCs4*(fDotC * vDotC) );
+                  forceDist[i] = prefactor * EQMWEIGHTS[i] *
+                                 (invCs2 * (fDotC - vScalarProductF) +
+                                  invCs4 * (fDotC * vDotC));
               }
           }
 #elif HEMELB_USE_SSE3
