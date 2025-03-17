@@ -78,7 +78,9 @@ namespace hemelb::lb
         using FArray = std::array<distribn_t, Q>;
 
         static constexpr Direction NUMVECTORS = Q;
-#ifdef HEMELB_USE_AVX
+#ifdef HEMELB_USE_OPENMP
+        static constexpr std::size_t SIMD_ALIGNMENT = 64;
+#elif HEMELB_USE_AVX
         static constexpr std::size_t SIMD_ALIGNMENT = 32;
 #else
         static constexpr std::size_t SIMD_ALIGNMENT = 16;
@@ -253,16 +255,26 @@ namespace hemelb::lb
 
 #elif HEMELB_USE_OPENMP
         inline static void CalculateDensityAndMomentum(const_span f,
-                                                       distribn_t &density,
+                                                       distribn_t& density,
                                                        LatticeMomentum& momentum) {
-          density = 0.0;
-          momentum = {0.0, 0.0, 0.0};
-#pragma omp simd
-          for (Direction i = 0; i < NUMVECTORS; ++i)
-          {
-            density += f[i];
-            momentum += VECTORS[i] * f[i];
-          }
+            distribn_t local_density    = 0.0;
+            distribn_t local_momentum_x = 0.0;
+            distribn_t local_momentum_y = 0.0;
+            distribn_t local_momentum_z = 0.0;
+
+#pragma omp simd reduction(+: local_density, local_momentum_x, local_momentum_y, local_momentum_z)
+            for (Direction i = 0; i < NUMVECTORS; ++i)
+            {
+                local_density    += f[i];
+                local_momentum_x += VECTORS[i].x() * f[i];
+                local_momentum_y += VECTORS[i].y() * f[i];
+                local_momentum_z += VECTORS[i].z() * f[i];
+            }
+
+            density      = local_density;
+            momentum.x() = local_momentum_x;
+            momentum.y() = local_momentum_y;
+            momentum.z() = local_momentum_z;
         }
 
 #else
@@ -473,30 +485,41 @@ namespace hemelb::lb
             }
         }
 #elif HEMELB_USE_OPENMP
-        inline static void CalculateFeq(const distribn_t &density, const distribn_t &momentum_x,
-                                        const distribn_t &momentum_y,
-                                        const distribn_t &momentum_z, mut_span f_eq)
+        inline static void CalculateFeq(distribn_t const& density,
+                                        distribn_t const& momentum_x,
+                                        distribn_t const& momentum_y,
+                                        distribn_t const& momentum_z,
+                                        mut_span f_eq)
         {
-          const distribn_t density_1 = 1. / density;
-          const distribn_t momentumMagnitudeSquared = momentum_x * momentum_x
-                                                      + momentum_y * momentum_y + momentum_z * momentum_z;
+            distribn_t const inv_density = 1.0 / density;
+            distribn_t const momentumMagnitudeSquared = momentum_x * momentum_x +
+                                                        momentum_y * momentum_y +
+                                                        momentum_z * momentum_z;
 
-#pragma omp simd
-          for (Direction i = 0; i < NUMVECTORS; ++i)
-          {
-            const distribn_t mom_dot_ei = CX[i] * momentum_x + CY[i] * momentum_y
-                                          + CZ[i] * momentum_z;
+            constexpr double c_3_2 = 3.0 / 2.0;
+            constexpr double c_9_2 = 9.0 / 2.0;
+            constexpr double c_3   = 3.0;
 
-            if constexpr (COMPRESSIBLE) {
-              f_eq[i] = EQMWEIGHTS[i]
-                        * (density - (3. / 2.) * momentumMagnitudeSquared * density_1
-                           + (9. / 2.) * density_1 * mom_dot_ei * mom_dot_ei + 3. * mom_dot_ei);
-            } else {
-              f_eq[i] = EQMWEIGHTS[i]
-                        * (density - (3. / 2.) * momentumMagnitudeSquared
-                           + (9. / 2.) * mom_dot_ei * mom_dot_ei + 3. * mom_dot_ei);
+  #pragma omp simd
+            for (Direction i = 0; i < NUMVECTORS; ++i)
+            {
+                distribn_t const mom_dot_ei = CX[i] * momentum_x +
+                                              CY[i] * momentum_y +
+                                              CZ[i] * momentum_z;
+
+                if constexpr (COMPRESSIBLE)
+                {
+                    f_eq[i] = EQMWEIGHTS[i] *
+                              (density - c_3_2 * momentumMagnitudeSquared * inv_density +
+                               c_9_2 * inv_density * mom_dot_ei * mom_dot_ei + c_3 * mom_dot_ei);
+                }
+                else
+                {
+                    f_eq[i] = EQMWEIGHTS[i] *
+                              (density - c_3_2 * momentumMagnitudeSquared +
+                               c_9_2 * mom_dot_ei * mom_dot_ei + c_3 * mom_dot_ei);
+                }
             }
-          }
         }
 #else
 
@@ -696,25 +719,39 @@ namespace hemelb::lb
 
           }
 #elif HEMELB_USE_OPENMP
-        inline static void CalculateForceDistribution(const distribn_t &tau,
-                                                      const LatticeVelocity& velocity,
-                                                      const LatticeForceVector& force,
+        inline static void CalculateForceDistribution(distribn_t const& tau,
+                                                      LatticeVelocity const& velocity,
+                                                      LatticeForceVector const& force,
                                                       mut_span forceDist)
         {
-          auto constexpr invCs2 = 1e0 / Cs2;
-          auto constexpr invCs4 = invCs2 * invCs2;
-          distribn_t prefactor = (1.0 - (1.0 / (2.0 * tau)));
-          distribn_t vDotF = Dot(velocity, force);
+            auto constexpr invCs2 = 1.0 / Cs2;
+            auto constexpr invCs4 = invCs2 * invCs2;
 
-#pragma omp simd
-          for (Direction i = 0; i < NUMVECTORS; ++i) {
-            distribn_t vDotDir = Dot(velocity, CD[i]);
-            distribn_t fDotDir = Dot(force, CD[i]);
+            distribn_t const velx = velocity.x();
+            distribn_t const vely = velocity.y();
+            distribn_t const velz = velocity.z();
 
-            forceDist[i] = prefactor * EQMWEIGHTS[i] * (
-                                                           invCs2 * (fDotDir - vDotF) + invCs4 * (fDotDir * vDotDir)
-                                                       );
-          }
+            distribn_t const fx = force.x();
+            distribn_t const fy = force.y();
+            distribn_t const fz = force.z();
+
+            distribn_t const vDotF = velx * fx + vely * fy + velz * fz;
+            distribn_t const prefactor = 1.0 - (1.0 / (2.0 * tau));
+
+  #pragma omp simd
+            for (Direction i = 0; i < NUMVECTORS; ++i)
+            {
+                distribn_t const cdx = CD[i].x();
+                distribn_t const cdy = CD[i].y();
+                distribn_t const cdz = CD[i].z();
+
+                distribn_t const vDotDir = velx * cdx + vely * cdy + velz * cdz;
+                distribn_t const fDotDir = fx * cdx + fy * cdy + fz * cdz;
+
+                forceDist[i] = prefactor * EQMWEIGHTS[i] * (
+                    invCs2 * (fDotDir - vDotF) + invCs4 * (fDotDir * vDotDir)
+                );
+            }
         }
 #else
 
