@@ -257,9 +257,9 @@ namespace hemelb::geometry
                 if (rrProc == SITE_OR_BLOCK_SOLID || rrProc == localRank)
                     continue;
 
-                auto [neighbourProc, remoteSiteIdx] = rank_for_site_store->GetSiteData(
+                auto neighbourProc = rank_for_site_store->GetSiteData(
                     neigh_block, neigh_site_id
-                );
+                )[0];
                 auto neighProcWithSite = std::find_if(
                     neighbouringProcs.begin(), neighbouringProcs.end(),
                     [&](NeighbouringProcessor const& np) {
