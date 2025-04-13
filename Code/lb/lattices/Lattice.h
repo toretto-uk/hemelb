@@ -19,6 +19,8 @@
 #include "util/Vector3D.h"
 #include "util/Matrix3D.h"
 
+#include <pat_api.h>
+
 namespace hemelb::lb
 {
     namespace detail {
@@ -117,6 +119,7 @@ namespace hemelb::lb
                                                        distribn_t &momentum_y,
                                                        distribn_t &momentum_z)
         {
+            PAT_region_begin(1, "CalculateDensityAndMomentum");
             __m256d accDens = _mm256_setzero_pd();
             __m256d accMomX = _mm256_setzero_pd();
             __m256d accMomY = _mm256_setzero_pd();
@@ -171,6 +174,7 @@ namespace hemelb::lb
             momentum_x = sumX    + partialMomX;
             momentum_y = sumY    + partialMomY;
             momentum_z = sumZ    + partialMomZ;
+            PAT_region_end(1);
         }
 #elif HEMELB_USE_SSE3
         inline static void CalculateDensityAndMomentum(const_span f,
@@ -198,6 +202,7 @@ namespace hemelb::lb
                                                        distribn_t &momentum_y,
                                                        distribn_t &momentum_z)
         {
+            PAT_region_begin(1, "CalculateDensityAndMomentum");
             // SSE2 accumulator registers containing a pair of double values
             __m128d density_SSE2;
             __m128d momentum_x_SSE2;
@@ -250,13 +255,14 @@ namespace hemelb::lb
             _mm_store_sd(&momentum_x, _mm_hadd_pd(momentum_x_SSE2, momentum_x_SSE2));
             _mm_store_sd(&momentum_y, _mm_hadd_pd(momentum_y_SSE2, momentum_y_SSE2));
             _mm_store_sd(&momentum_z, _mm_hadd_pd(momentum_z_SSE2, momentum_z_SSE2));
-
+            PAT_region_end(1);
           }
 
 #elif HEMELB_USE_OPENMP
         inline static void CalculateDensityAndMomentum(const_span f,
                                                        distribn_t& density,
                                                        LatticeMomentum& momentum) {
+            PAT_region_begin(1, "CalculateDensityAndMomentum");
             distribn_t local_density    = 0.0;
             distribn_t local_momentum_x = 0.0;
             distribn_t local_momentum_y = 0.0;
@@ -275,12 +281,14 @@ namespace hemelb::lb
             momentum.x() = local_momentum_x;
             momentum.y() = local_momentum_y;
             momentum.z() = local_momentum_z;
+            PAT_region_end(1);
         }
 
 #else
         inline static void CalculateDensityAndMomentum(const_span f,
                                                        distribn_t &density,
                                                        LatticeMomentum& momentum) {
+            PAT_region_begin(1, "CalculateDensityAndMomentum");
             density = 0.0;
             momentum = {0.0, 0.0, 0.0};
             for (Direction i = 0; i < NUMVECTORS; ++i)
@@ -288,6 +296,7 @@ namespace hemelb::lb
               density += f[i];
               momentum += VECTORS[i] * f[i];
             }
+            PAT_region_end(1);
         }
 
 #endif
@@ -325,6 +334,7 @@ namespace hemelb::lb
                                  distribn_t const& momentum_z,
                                  mut_span f_eq)
         {
+            PAT_region_begin(2, "CalculateFeq");
             static constexpr distribn_t THREE_HALVES = 3.0 / 2.0;
             static constexpr distribn_t NINE_HALVES = 9.0 / 2.0;
             static constexpr distribn_t THREE = 3.0;
@@ -382,6 +392,7 @@ namespace hemelb::lb
                            nineHalvesOfDensity_1 * (mom_dot_ei * mom_dot_ei) +
                            THREE * mom_dot_ei);
             }
+            PAT_region_end(2);
         }
 #elif HEMELB_USE_SSE3
         /**
@@ -404,6 +415,7 @@ namespace hemelb::lb
                                  const distribn_t &momentum_z,
                                  mut_span f_eq)
         {
+            PAT_region_begin(2, "CalculateFeq");
             // f_eq[i] = EQMWEIGHTS[i]
             //            * (density - (3. / 2.) * momentumMagnitudeSquared/ DENSITY // Note this line invariant over i loop
             //               + (9. / 2. * DENSITY) * mom_dot_ei * mom_dot_ei + 3. * mom_dot_ei);
@@ -483,6 +495,7 @@ namespace hemelb::lb
                              + 3. * mom_dot_ei);
 
             }
+            PAT_region_end(2);
         }
 #elif HEMELB_USE_OPENMP
         inline static void CalculateFeq(distribn_t const& density,
@@ -491,6 +504,7 @@ namespace hemelb::lb
                                         distribn_t const& momentum_z,
                                         mut_span f_eq)
         {
+            PAT_region_begin(2, "CalculateFeq");
             distribn_t const inv_density = 1.0 / density;
             distribn_t const momentumMagnitudeSquared = momentum_x * momentum_x +
                                                         momentum_y * momentum_y +
@@ -520,6 +534,7 @@ namespace hemelb::lb
                                c_9_2 * mom_dot_ei * mom_dot_ei + c_3 * mom_dot_ei);
                 }
             }
+            PAT_region_end(2);
         }
 #else
 
@@ -535,6 +550,7 @@ namespace hemelb::lb
                                           const distribn_t &momentum_y,
                                           const distribn_t &momentum_z, mut_span f_eq)
           {
+            PAT_region_begin(2, "CalculateFeq");
             const distribn_t density_1 = 1. / density;
             const distribn_t momentumMagnitudeSquared = momentum_x * momentum_x
                 + momentum_y * momentum_y + momentum_z * momentum_z;
@@ -554,6 +570,7 @@ namespace hemelb::lb
                                + (9. / 2.) * mom_dot_ei * mom_dot_ei + 3. * mom_dot_ei);
               }
             }
+            PAT_region_end(2);
           }
 #endif
 
@@ -578,6 +595,7 @@ namespace hemelb::lb
                                                         LatticeForce const& force_z,
                                                         mut_span forceDist)
           {
+              PAT_region_begin(3, "CalculateForceDistribution");
               distribn_t invCs2 = 1.0 / Cs2;
               distribn_t invCs4 = invCs2 * invCs2;
               distribn_t prefactor = 1.0 - 1.0 / (2.0 * tau);
@@ -631,6 +649,7 @@ namespace hemelb::lb
                                  (invCs2 * (fDotC - vScalarProductF) +
                                   invCs4 * (fDotC * vDotC));
               }
+              PAT_region_end(3);
           }
 #elif HEMELB_USE_SSE3
 
@@ -662,7 +681,7 @@ namespace hemelb::lb
                                                         const LatticeForce &force_z,
                                                         mut_span forceDist)
           {
-
+            PAT_region_begin(3, "CalculateForceDistribution");
             auto const invCs2 = 1e0 / Cs2;
             auto const invCs4 = invCs2 * invCs2;
             const __m128d vx = _mm_set1_pd(velocity_x);
@@ -716,7 +735,7 @@ namespace hemelb::lb
                   * ( invCs2 * (FScalarProductDirection - vScalarProductF)
                       + invCs4 * (FScalarProductDirection * vScalarProductDirection));
             }
-
+            PAT_region_end(3);
           }
 #elif HEMELB_USE_OPENMP
         inline static void CalculateForceDistribution(distribn_t const& tau,
@@ -724,6 +743,7 @@ namespace hemelb::lb
                                                       LatticeForceVector const& force,
                                                       mut_span forceDist)
         {
+            PAT_region_begin(3, "CalculateForceDistribution");
             auto constexpr invCs2 = 1.0 / Cs2;
             auto constexpr invCs4 = invCs2 * invCs2;
 
@@ -752,6 +772,7 @@ namespace hemelb::lb
                     invCs2 * (fDotDir - vDotF) + invCs4 * (fDotDir * vDotDir)
                 );
             }
+            PAT_region_end(3);
         }
 #else
 
@@ -760,6 +781,7 @@ namespace hemelb::lb
                                                       const LatticeForceVector& force,
                                                       mut_span forceDist)
         {
+            PAT_region_begin(3, "CalculateForceDistribution");
             auto constexpr invCs2 = 1e0 / Cs2;
             auto constexpr invCs4 = invCs2 * invCs2;
             distribn_t prefactor = (1.0 - (1.0 / (2.0 * tau)));
@@ -773,6 +795,7 @@ namespace hemelb::lb
                     invCs2 * (fDotDir - vDotF) + invCs4 * (fDotDir * vDotDir)
                 );
             }
+            PAT_region_end(3);
         }
 #endif
 
