@@ -7,7 +7,7 @@
 #define HEMELB_NET_MPIERROR_H
 
 #include <functional>
-#include <source_location>
+#include <experimental/source_location>
 
 #include <mpi.h>
 
@@ -44,9 +44,9 @@ namespace hemelb::net
     template <typename FuncT>
     struct MpiCall {
         FuncT* func;
-        std::source_location loc;
+        std::experimental::source_location loc;
 
-        MpiCall(FuncT* f, std::source_location l = std::source_location::current())
+        MpiCall(FuncT* f, std::experimental::source_location l = std::experimental::source_location::current())
             : func(std::move(f)), loc(l) {
         }
 

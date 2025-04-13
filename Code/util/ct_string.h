@@ -31,7 +31,7 @@ namespace hemelb {
         constexpr auto length() const {
             return N;
         }
-        constexpr std::string str() const {
+        std::string str() const {
             return {str_, N};
         }
         constexpr std::string_view view() const {
@@ -42,7 +42,7 @@ namespace hemelb {
             return str_;
         }
 
-        constexpr operator std::string() const{
+        operator std::string() const{
             return str();
         }
     };
