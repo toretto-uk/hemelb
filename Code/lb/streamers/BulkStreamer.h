@@ -97,7 +97,7 @@ namespace hemelb::lb
 
                 UpdateCachePostCollision(site, hydroVars, lbmParams, propertyCache);
 
-                log::Logger::Log<log::Info, log::OnePerCore>("Thread id: %d\n", omp_get_thread_num());
+                //log::Logger::Log<log::Info, log::OnePerCore>("Thread id: %d\n", omp_get_thread_num());
             }
             auto end = std::chrono::system_clock::now();
             elapsed += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
