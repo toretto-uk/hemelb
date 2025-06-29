@@ -96,10 +96,15 @@ namespace hemelb::lb
           // sending up a 'Unstable' value anyway.
           if (mUpwardsStability != Unstable)
           {
+            bool stop = false;
             bool unconvergedSitePresent = false;
 
+#pragma omp parallel for shared(stop, unconvergedSitePresent)
             for (site_t i = 0; i < mLatDat->GetDomain().GetLocalFluidSiteCount(); i++)
             {
+              if (stop)
+                continue;
+
               for (unsigned int l = 0; l < LatticeType::NUMVECTORS; l++)
               {
                 distribn_t value = *mLatDat->GetFNew(i * LatticeType::NUMVECTORS + l);
@@ -107,15 +112,17 @@ namespace hemelb::lb
                 // Note that by testing for value > 0.0, we also catch stray NaNs.
                 if (! (value > 0.0))
                 {
-                  mUpwardsStability = Unstable;
+#pragma omp critical
+                  {
+                    mUpwardsStability = Unstable;
+                    stop = true;
+                  }
                   break;
                 }
               }
-              ///@todo: If we refactor the previous loop out, we can get away with a single break statement
-              if (mUpwardsStability == Unstable)
-              {
-                break;
-              }
+
+              if (stop)
+                continue;
 
               if (testerConfig.doConvergenceCheck)
               {
@@ -125,7 +132,7 @@ namespace hemelb::lb
 
                 if (relativeDifference > testerConfig.convergenceRelativeTolerance)
                 {
-                  // The simulation is stable but hasn't converged in the whole domain yet.
+#pragma omp atomic write
                   unconvergedSitePresent = true;
                 }
               }
