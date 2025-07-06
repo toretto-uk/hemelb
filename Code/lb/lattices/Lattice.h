@@ -262,13 +262,18 @@ namespace hemelb::lb
             distribn_t local_momentum_y = 0.0;
             distribn_t local_momentum_z = 0.0;
 
-#pragma omp simd reduction(+: local_density, local_momentum_x, local_momentum_y, local_momentum_z)
+			const distribn_t* const ptrCXD = CXD.data();
+			const distribn_t* const ptrCYD = CYD.data();
+			const distribn_t* const ptrCZD = CZD.data();
+
+#pragma omp simd aligned(ptrCXD, ptrCYD, ptrCZD : SIMD_ALIGNMENT) \
+                 reduction(+ : local_density, local_momentum_x, local_momentum_y, local_momentum_z)
             for (Direction i = 0; i < NUMVECTORS; ++i)
             {
                 local_density    += f[i];
-                local_momentum_x += VECTORS[i].x() * f[i];
-                local_momentum_y += VECTORS[i].y() * f[i];
-                local_momentum_z += VECTORS[i].z() * f[i];
+                local_momentum_x += ptrCXD[i] * f[i];
+                local_momentum_y += ptrCYD[i] * f[i];
+                local_momentum_z += ptrCZD[i] * f[i];
             }
 
             density      = local_density;
@@ -500,22 +505,27 @@ namespace hemelb::lb
             constexpr double c_9_2 = 9.0 / 2.0;
             constexpr double c_3   = 3.0;
 
-  #pragma omp simd
+			const distribn_t* const ptrCXD = CXD.data();
+			const distribn_t* const ptrCYD = CYD.data();
+			const distribn_t* const ptrCZD = CZD.data();
+			const distribn_t* const ptrEQMWEIGHTS = EQMWEIGHTS.data();
+
+#pragma omp simd aligned(ptrCXD, ptrCYD, ptrCZD, ptrEQMWEIGHTS : SIMD_ALIGNMENT)
             for (Direction i = 0; i < NUMVECTORS; ++i)
             {
-                distribn_t const mom_dot_ei = CX[i] * momentum_x +
-                                              CY[i] * momentum_y +
-                                              CZ[i] * momentum_z;
+                distribn_t const mom_dot_ei = ptrCXD[i] * momentum_x +
+                                              ptrCYD[i] * momentum_y +
+                                              ptrCZD[i] * momentum_z;
 
                 if constexpr (COMPRESSIBLE)
                 {
-                    f_eq[i] = EQMWEIGHTS[i] *
+                    f_eq[i] = ptrEQMWEIGHTS[i] *
                               (density - c_3_2 * momentumMagnitudeSquared * inv_density +
                                c_9_2 * inv_density * mom_dot_ei * mom_dot_ei + c_3 * mom_dot_ei);
                 }
                 else
                 {
-                    f_eq[i] = EQMWEIGHTS[i] *
+                    f_eq[i] = ptrEQMWEIGHTS[i] *
                               (density - c_3_2 * momentumMagnitudeSquared +
                                c_9_2 * mom_dot_ei * mom_dot_ei + c_3 * mom_dot_ei);
                 }
@@ -738,17 +748,22 @@ namespace hemelb::lb
             distribn_t const vDotF = velx * fx + vely * fy + velz * fz;
             distribn_t const prefactor = 1.0 - (1.0 / (2.0 * tau));
 
-  #pragma omp simd
+			const distribn_t* const ptrCXD = CXD.data();
+			const distribn_t* const ptrCYD = CYD.data();
+			const distribn_t* const ptrCZD = CZD.data();
+			const distribn_t* const ptrEQMWEIGHTS = EQMWEIGHTS.data();
+
+#pragma omp simd aligned(ptrCXD, ptrCYD, ptrCZD, ptrEQMWEIGHTS : SIMD_ALIGNMENT)
             for (Direction i = 0; i < NUMVECTORS; ++i)
             {
-                distribn_t const cdx = CD[i].x();
-                distribn_t const cdy = CD[i].y();
-                distribn_t const cdz = CD[i].z();
+                distribn_t const cdx = ptrCXD[i];
+                distribn_t const cdy = ptrCYD[i];
+                distribn_t const cdz = ptrCZD[i];
 
                 distribn_t const vDotDir = velx * cdx + vely * cdy + velz * cdz;
                 distribn_t const fDotDir = fx * cdx + fy * cdy + fz * cdz;
 
-                forceDist[i] = prefactor * EQMWEIGHTS[i] * (
+                forceDist[i] = prefactor * ptrEQMWEIGHTS[i] * (
                     invCs2 * (fDotDir - vDotF) + invCs4 * (fDotDir * vDotDir)
                 );
             }
