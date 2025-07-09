@@ -99,7 +99,7 @@ namespace hemelb::lb
             bool stop = false;
             bool unconvergedSitePresent = false;
 
-#pragma omp parallel for shared(stop, unconvergedSitePresent)
+#pragma omp parallel for shared(stop, unconvergedSitePresent) schedule(runtime)
             for (site_t i = 0; i < mLatDat->GetDomain().GetLocalFluidSiteCount(); i++)
             {
               if (stop)
