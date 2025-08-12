@@ -78,7 +78,7 @@ namespace hemelb::lb
         using FArray = std::array<distribn_t, Q>;
 
         static constexpr Direction NUMVECTORS = Q;
-#ifdef HEMELB_USE_OPENMP
+#ifdef HEMELB_USE_OPENMP_SIMD
         static constexpr std::size_t SIMD_ALIGNMENT = 64;
 #elif HEMELB_USE_AVX
         static constexpr std::size_t SIMD_ALIGNMENT = 32;
@@ -253,7 +253,7 @@ namespace hemelb::lb
 
           }
 
-#elif HEMELB_USE_OPENMP
+#elif HEMELB_USE_OPENMP_SIMD
         inline static void CalculateDensityAndMomentum(const_span f,
                                                        distribn_t& density,
                                                        LatticeMomentum& momentum) {
@@ -489,7 +489,7 @@ namespace hemelb::lb
 
             }
         }
-#elif HEMELB_USE_OPENMP
+#elif HEMELB_USE_OPENMP_SIMD
         inline static void CalculateFeq(distribn_t const& density,
                                         distribn_t const& momentum_x,
                                         distribn_t const& momentum_y,
@@ -728,7 +728,7 @@ namespace hemelb::lb
             }
 
           }
-#elif HEMELB_USE_OPENMP
+#elif HEMELB_USE_OPENMP_SIMD
         inline static void CalculateForceDistribution(distribn_t const& tau,
                                                       LatticeVelocity const& velocity,
                                                       LatticeForceVector const& force,
